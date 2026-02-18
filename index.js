@@ -1,7 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api')
 
 const token = require('./.token')
-const guard = require('./guard')
+const guard = require('./guard') // guard.js đã return true => chạy 24/7
 const orm = require('./orm')
 
 const bot = new TelegramBot(token, { polling: true })
@@ -20,7 +20,7 @@ const CLEAR_CHAT_SPACE = Array(40).fill('\n').join('.')
 const CLEAR_CHAT_TEXT = 'Whaaa! Do not spoil things in here! 🚨'
 
 // ===============================
-// 🔪 KICK (GIỮ NGUYÊN + FIX LỖI)
+// 🔪 KICK
 // ===============================
 const kick = (chatID, userID, name) => {
   bot.kickChatMember(chatID, userID).then((kicked) => {
@@ -32,7 +32,7 @@ const kick = (chatID, userID, name) => {
 }
 
 // ===============================
-// ⚠️ WARN (GIỮ NGUYÊN)
+// ⚠️ WARN CŨ (giữ nguyên ORM)
 // ===============================
 const warn = (chatID, name) => {
   orm.addUser(name)
@@ -41,7 +41,7 @@ const warn = (chatID, name) => {
 }
 
 // ===============================
-// 🔒 MUTE 3 GIỜ (THÊM)
+// 🔒 MUTE 3 GIỜ
 // ===============================
 async function muteUser(chatID, userID, name, reason) {
   const untilDate = Math.floor(Date.now() / 1000) + (MUTE_HOURS * 60 * 60)
@@ -58,10 +58,10 @@ async function muteUser(chatID, userID, name, reason) {
 }
 
 // ===============================
-// 🚨 WARN SYSTEM MỚI (KHÔNG ẢNH HƯỞNG ORM CŨ)
+// 🚨 WARN SYSTEM MỚI (FIX DELETE MESSAGE)
 // ===============================
-async function warnAdvanced(chatID, userID, name, reason) {
-  await bot.deleteMessage(chatID, undefined).catch(() => {})
+async function warnAdvanced(chatID, userID, name, reason, messageID) {
+  await bot.deleteMessage(chatID, messageID).catch(() => {})
 
   if (!userWarnings[userID]) userWarnings[userID] = 0
 
@@ -80,7 +80,7 @@ async function warnAdvanced(chatID, userID, name, reason) {
 }
 
 // ===============================
-// 📊 /warns (GIỮ NGUYÊN)
+// 📊 /warns
 // ===============================
 bot.onText(/\/warns/, async (incoming) => {
   const chatID = incoming.chat.id
@@ -96,7 +96,7 @@ bot.onText(/\/warns/, async (incoming) => {
 })
 
 // ===============================
-// 🚨 MAIN MESSAGE HANDLER (TÍCH HỢP)
+// 🚨 MAIN MESSAGE HANDLER
 // ===============================
 bot.on('message', async (incoming) => {
 
@@ -114,7 +114,7 @@ bot.on('message', async (incoming) => {
     }
 
     // ===================================
-    // 🔥 GUARD GỐC (GIỮ NGUYÊN)
+    // 🔥 GUARD (24/7)
     // ===================================
     if (guard(new Date())) {
 
@@ -133,7 +133,7 @@ bot.on('message', async (incoming) => {
 
     if (userLastMessage[userID]) {
       if (now - userLastMessage[userID] < SPAM_LIMIT_SECONDS) {
-        return warnAdvanced(chatID, userID, name, "Spam tin nhắn")
+        return warnAdvanced(chatID, userID, name, "Spam tin nhắn", incoming.message_id)
       }
     }
 
@@ -143,7 +143,7 @@ bot.on('message', async (incoming) => {
     // 🖼️ CHẶN ẢNH
     // ===================================
     if (incoming.photo) {
-      return warnAdvanced(chatID, userID, name, "Gửi hình ảnh")
+      return warnAdvanced(chatID, userID, name, "Gửi hình ảnh", incoming.message_id)
     }
 
     // ===================================
@@ -152,7 +152,7 @@ bot.on('message', async (incoming) => {
     if (incoming.entities) {
       for (let entity of incoming.entities) {
         if (entity.type === "url" || entity.type === "text_link") {
-          return warnAdvanced(chatID, userID, name, "Gửi link website")
+          return warnAdvanced(chatID, userID, name, "Gửi link website", incoming.message_id)
         }
       }
     }
@@ -163,7 +163,7 @@ bot.on('message', async (incoming) => {
     if (incoming.text) {
       const domainPattern = /\b[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|me|co)\b/i
       if (domainPattern.test(incoming.text)) {
-        return warnAdvanced(chatID, userID, name, "Gửi link website")
+        return warnAdvanced(chatID, userID, name, "Gửi link website", incoming.message_id)
       }
     }
 
@@ -172,4 +172,4 @@ bot.on('message', async (incoming) => {
   }
 })
 
-console.log("Bot đang chạy...")
+console.log("Bot đang chạy 24/7...")
