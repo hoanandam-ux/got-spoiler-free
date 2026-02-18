@@ -1,13 +1,14 @@
 const TelegramBot = require('node-telegram-bot-api')
-
-const token = require('./.token')
-const guard = require('./guard') // guard.js đã return true => chạy 24/7
 const orm = require('./orm')
 
-const bot = new TelegramBot(token, { polling: true })
+// 🔑 TOKEN
+const token = require('./.token')
+
+// ❗ Fix lỗi 409: đảm bảo chỉ polling 1 instance
+const bot = new TelegramBot(token, { polling: { interval: 300, autoStart: true } })
 
 // ===============================
-// ⚙️ CẤU HÌNH CHỐNG SPAM
+// ⚙️ CẤU HÌNH
 // ===============================
 const SPAM_LIMIT_SECONDS = 3
 const MUTE_HOURS = 3
@@ -16,29 +17,8 @@ const MAX_WARNINGS = 3
 let userLastMessage = {}
 let userWarnings = {}
 
-const CLEAR_CHAT_SPACE = Array(40).fill('\n').join('.')
-const CLEAR_CHAT_TEXT = 'Whaaa! Do not spoil things in here! 🚨'
-
-// ===============================
-// 🔪 KICK
-// ===============================
-const kick = (chatID, userID, name) => {
-  bot.kickChatMember(chatID, userID).then((kicked) => {
-    if (kicked) {
-      orm.set(name, 2)
-      bot.sendMessage(chatID, `🔪 ${name} is being kicked out`)
-    }
-  })
-}
-
-// ===============================
-// ⚠️ WARN CŨ (giữ nguyên ORM)
-// ===============================
-const warn = (chatID, name) => {
-  orm.addUser(name)
-  orm.set(name, 1)
-  bot.sendMessage(chatID, `Ooops! First and last warn for ${name} 🙅`)
-}
+const CLEAR_CHAT_SPACE = Array(20).fill('\n').join('.')
+const CLEAR_CHAT_TEXT = '🚫 Không được spoil, spam, gửi ảnh hoặc link!'
 
 // ===============================
 // 🔒 MUTE 3 GIỜ
@@ -51,14 +31,11 @@ async function muteUser(chatID, userID, name, reason) {
     until_date: untilDate
   })
 
-  bot.sendMessage(
-    chatID,
-    `🚫 ${name} đã bị khóa 3 giờ vì: ${reason}`
-  )
+  bot.sendMessage(chatID, `🚫 ${name} đã bị khóa 3 giờ vì: ${reason}`)
 }
 
 // ===============================
-// 🚨 WARN SYSTEM MỚI (FIX DELETE MESSAGE)
+// ⚠️ CẢNH CÁO NÂNG CAO
 // ===============================
 async function warnAdvanced(chatID, userID, name, reason, messageID) {
   await bot.deleteMessage(chatID, messageID).catch(() => {})
@@ -80,75 +57,56 @@ async function warnAdvanced(chatID, userID, name, reason, messageID) {
 }
 
 // ===============================
-// 📊 /warns
+// 👋 CHÀO THÀNH VIÊN MỚI
 // ===============================
-bot.onText(/\/warns/, async (incoming) => {
-  const chatID = incoming.chat.id
-  const users = await orm.getUsers()
-
-  const message = users.map(([user, warning]) => {
-    return warning === '1'
-      ? `⚠️ ${user} has ${warning} warn(s)`
-      : `☠️ ${user} has been kicked out`
-  })
-
-  bot.sendMessage(chatID, message.join('\n'))
+bot.on('new_chat_members', async (msg) => {
+  for (const member of msg.new_chat_members) {
+    if (member.is_bot) continue
+    bot.sendMessage(
+      msg.chat.id,
+      `🎉 Chào mừng ${member.first_name} vào nhóm!\n⚠️ Không spam, không gửi ảnh, không gửi link.`
+    )
+  }
 })
 
 // ===============================
-// 🚨 MAIN MESSAGE HANDLER
+// 🚨 MAIN HANDLER
 // ===============================
 bot.on('message', async (incoming) => {
+
+  if (!incoming.from) return
 
   const chatID = incoming.chat.id
   const userID = incoming.from.id
   const name = incoming.from.username || incoming.from.first_name
-  const cleanChatMessage = CLEAR_CHAT_SPACE + CLEAR_CHAT_TEXT
+  const now = Date.now() / 1000
 
   try {
     const member = await bot.getChatMember(chatID, userID)
 
-    // Admin không áp dụng luật
-    if (member.status === "administrator" || member.status === "creator") {
-      return
-    }
+    // Admin bỏ qua
+    if (member.status === "administrator" || member.status === "creator") return
 
-    // ===================================
-    // 🔥 GUARD (24/7)
-    // ===================================
-    if (guard(new Date())) {
-
-      const warning = await orm.get(name)
-      bot.sendMessage(chatID, cleanChatMessage)
-
-      return warning === '1'
-        ? bot.kickChatMember(chatID, userID)
-        : warn(chatID, name)
-    }
-
-    // ===================================
+    // ===============================
     // 🛑 CHỐNG SPAM 3 GIÂY
-    // ===================================
-    const now = Date.now() / 1000
-
+    // ===============================
     if (userLastMessage[userID]) {
       if (now - userLastMessage[userID] < SPAM_LIMIT_SECONDS) {
         return warnAdvanced(chatID, userID, name, "Spam tin nhắn", incoming.message_id)
       }
     }
-
     userLastMessage[userID] = now
 
-    // ===================================
+    // ===============================
     // 🖼️ CHẶN ẢNH
-    // ===================================
+    // ===============================
     if (incoming.photo) {
       return warnAdvanced(chatID, userID, name, "Gửi hình ảnh", incoming.message_id)
     }
 
-    // ===================================
-    // 🔗 CHẶN LINK
-    // ===================================
+    // ===============================
+    // 🔗 CHẶN LINK TELEGRAM DETECT
+    // ===============================
     if (incoming.entities) {
       for (let entity of incoming.entities) {
         if (entity.type === "url" || entity.type === "text_link") {
@@ -157,9 +115,9 @@ bot.on('message', async (incoming) => {
       }
     }
 
-    // ===================================
+    // ===============================
     // 🌐 CHẶN DOMAIN KHÔNG HTTP
-    // ===================================
+    // ===============================
     if (incoming.text) {
       const domainPattern = /\b[a-zA-Z0-9-]+\.(com|net|org|vn|xyz|info|io|me|co)\b/i
       if (domainPattern.test(incoming.text)) {
@@ -168,8 +126,8 @@ bot.on('message', async (incoming) => {
     }
 
   } catch (err) {
-    console.log(err)
+    console.log("Lỗi:", err.message)
   }
 })
 
-console.log("Bot đang chạy 24/7...")
+console.log("🤖 Bot Telegram đang chạy 24/7...")
