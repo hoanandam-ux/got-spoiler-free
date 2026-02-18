@@ -1,16 +1,18 @@
 {
   "name": "got-spoiler-free",
   "version": "1.0.0",
-  "description": "",
+  "description": "Telegram spoiler guard bot",
   "main": "index.js",
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
     "date-fns": "^1.28.5",
     "level": "^1.7.0",
     "node-telegram-bot-api": "^0.27.1"
   },
-  "devDependencies": {},
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
   "author": "",
   "license": "ISC"
